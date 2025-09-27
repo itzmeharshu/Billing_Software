@@ -41,11 +41,14 @@ def generate_pdf(bill_id, data):
     # Define constants
     outer_margin = 0.2 * inch # Margin from edge of the A6 page
     
-    # Left Content Anchor: Used for all labels (Date:, Party:, Empty Qty:)
-    x_left_content = outer_margin + 0.1 * inch 
+    # NEW: Further reduced horizontal padding for content alignment (was 0.20 inch, now 0.15 inch)
+    INNER_PADDING = 0.15 * inch
+    
+    # Left Content Anchor: Used for all labels (Party:, Empty Qty:)
+    x_left_content = outer_margin + INNER_PADDING
     
     # Right Content Anchor: Used for right-justifying quantities (KG values) and all detail values (RKS, CRUSHER)
-    X_RIGHT_CONTENT_ANCHOR = A6[0] - outer_margin - 0.1 * inch 
+    X_RIGHT_CONTENT_ANCHOR = A6[0] - outer_margin - INNER_PADDING 
     
     y_start_content = A6[1] - outer_margin - 0.2 * inch # Top edge for text content
     line_spacing = 0.16 * inch # Base vertical spacing for compact look
@@ -53,11 +56,16 @@ def generate_pdf(bill_id, data):
     # Helper for drawing the thin separator lines
     def draw_separator(y):
         c.setLineWidth(0.5) # Thin line
+        c.setDash(3, 3)     # Set to dotted line: 3 points on, 3 points off
         c.line(outer_margin, y, A6[0] - outer_margin, y)
-
-    # --- Outer Border (Retained) ---
+        c.setDash([])       # FIX: Reset to solid line by passing an empty list
+        
+    # --- Outer Border (Dotted) ---
     c.setLineWidth(0.5) 
+    c.setDash(3, 3) # Set the outer border to dotted
     c.rect(outer_margin, outer_margin, A6[0] - 2*outer_margin, A6[1] - 2*outer_margin)
+    c.setDash([]) # Reset back to solid for internal content
+    
 
     # --- Header ---
     y = y_start_content
@@ -71,46 +79,31 @@ def generate_pdf(bill_id, data):
     c.drawCentredString(A6[0] / 2, y, "GSTIN/UIN #:")
     y -= line_spacing * 0.8
     
-    # --- Line 1 (After Header) ---
-    # draw_separator(y) # REMOVED: Separator after GSTIN/UIN #
-
-    # --- Date and Time (Fixed to prevent overlap) ---
+    # --- Date and Time (Centered) ---
     y -= line_spacing * 1.0 
     c.setFont("Courier", 9)
     
-    # Split the date_time_str into date and time parts
-    date_part = ""
-    time_part = ""
-    if " TIME: " in date_time_str:
-        parts = date_time_str.split(" TIME: ")
-        date_part = parts[0]
-        time_part = parts[1] if len(parts) > 1 else ""
-    else:
-        date_part = date_time_str
-
-    # 1. Date (Left aligned)
-    date_label = "Date: "
-    c.drawString(x_left_content, y, date_label + date_part) 
+    # Prepare the date/time string for centering
+    date_part_split = date_time_str.split(" TIME: ")
+    date_part = date_part_split[0]
+    time_part = date_part_split[1] if len(date_part_split) > 1 else ""
     
-    # 2. Time (Right aligned)
-    time_label = "Time: "
-    c.drawRightString(X_RIGHT_CONTENT_ANCHOR, y, time_part) # Time value
+    # Centered Date and Time string
+    date_time_centered_str = f"Date: {date_part} Time: {time_part}"
+    c.drawCentredString(A6[0] / 2, y, date_time_centered_str) 
     
-    # Calculate where the "Time: " label should start for proper spacing
-    time_label_width = c.stringWidth(time_part, "Courier", 9)
-    x_time_label = X_RIGHT_CONTENT_ANCHOR - time_label_width - c.stringWidth(time_label, "Courier", 9)
-    c.drawString(x_time_label, y, time_label) # Time label
-    
-    # --- DC/Ref # ---
+    # --- DC/Ref # (Centered) ---
     y -= line_spacing * 1.5
     c.setFont("Courier", 10)
-    c.drawString(x_left_content, y, "DC/Ref #: ")
-    c.drawString(x_left_content + c.stringWidth("DC/Ref #: ", "Courier", 10), y, ref_no)
+    
+    # Centered DC/Ref # string
+    dc_ref_centered_str = f"DC/Ref #: {ref_no}"
+    c.drawCentredString(A6[0] / 2, y, dc_ref_centered_str)
     
     y -= line_spacing * 0.5 
     
-    # --- Line 2 (Before OUTGOING TRIP) ---
-    # KEEP: Separator below DC/Ref #
+    # --- Line 2 (Below DC/Ref #) ---
+    # KEEP: Separator below DC/Ref #, now DOTTED
     draw_separator(y) 
     
     # --- Trip Details Header ---
@@ -165,7 +158,6 @@ def generate_pdf(bill_id, data):
     y -= line_spacing * 1.5 
     
     # Horizontal line just above the Thank You message
-    # draw_separator(y) # REMOVED: Separator before footer
     
     y -= line_spacing * 1.0
     c.setFont("Courier", 8)
@@ -199,7 +191,8 @@ def insert_bill(**data):
 # --- 3. MAIN APPLICATION LOGIC ---
 
 # Function to format lines for the fixed-width preview
-def format_preview_line(label, value, label_width=12):
+# REDUCED label_width from 10 to 9 to reduce gap
+def format_preview_line(label, value, label_width=9):
     """Pads the label to a fixed width for clean column alignment in the preview."""
     padded_label = f"{label: <{label_width}}"
     return f"{padded_label}{value}\n"
@@ -243,6 +236,11 @@ def update_preview():
         time_part = parts[1] if len(parts) > 1 else ""
     else:
         date_part = date_time_for_pdf
+
+    # Helper for centering text in the fixed-width Text widget (40 chars wide)
+    def center_preview_line(text, total_width=40):
+        padding = (total_width - len(text)) // 2
+        return f"{' ' * padding}{text}{' ' * (total_width - len(text) - padding)}\n"
         
     preview_text.delete("1.0", tk.END)
     
@@ -250,25 +248,26 @@ def update_preview():
     preview_text.insert(tk.END, f"            SEBM\n")
     preview_text.insert(tk.END, f"    Sri Elumalaiyan Blue Metals\n")
     preview_text.insert(tk.END, f"          GSTIN/UIN #:\n")
-    # preview_text.insert(tk.END, f"-----------------------------------\n") # REMOVED: Separator after GSTIN/UIN #
     
-    # Fix: Date and Time on one line, separated clearly
-    date_str = f"Date: {date_part}"
-    time_str = f"Time: {time_part}"
-    # Calculate spacing assuming a max line width of 35 chars
-    gap = 35 - len(date_str) - len(time_str)
-    gap_str = " " * max(1, gap)
-    preview_text.insert(tk.END, f"{date_str}{gap_str}{time_str}\n")
+    # Dotted Outer Border (Simulated for top)
+    preview_text.insert(tk.END, f". . . . . . . . . . . . . . . . . . .\n")
     
-    preview_text.insert(tk.END, f"DC/Ref #: {ref_no}\n")
-    preview_text.insert(tk.END, f"-----------------------------------\n") # KEEP: Separator below DC/Ref #
+    # Centered Date and Time
+    date_time_centered_str = f"Date: {date_part} Time: {time_part}"
+    preview_text.insert(tk.END, center_preview_line(date_time_centered_str))
+    
+    # Centered DC/Ref #
+    dc_ref_centered_str = f"DC/Ref #: {ref_no}"
+    preview_text.insert(tk.END, center_preview_line(dc_ref_centered_str))
+    
+    # Dotted Separator line
+    preview_text.insert(tk.END, f"- - - - - - - - - - - - - - - - - -\n") 
     
     preview_text.insert(tk.END, f"          OUTGOING TRIP\n")
-    preview_text.insert(tk.END, f"-----------------------------------\n") # This was part of the original logic, let's keep it to maintain block structure alignment
     
     # Use the formatting helper for consistent left-column alignment
-    # Max width for right-aligned text values to align them properly (matches KG width)
-    MAX_TEXT_WIDTH = 15
+    # Adjusted from 17 to 18 to align cleanly with reduced label width (9)
+    MAX_TEXT_WIDTH = 18 
     
     def format_detail_line(label, value):
         padded_value = f"{value: >{MAX_TEXT_WIDTH}}"
@@ -289,7 +288,8 @@ def update_preview():
     
     # Helper for right-aligning the KG values in the preview
     def format_qty_line(label, qty_str):
-        padded_qty = f"{qty_str: >{MAX_KG_WIDTH}} KG"
+        # Adjusted padding for the value to align with MAX_TEXT_WIDTH + " KG"
+        padded_qty = f"{qty_str: >{MAX_KG_WIDTH}} KG" 
         return format_preview_line(label, padded_qty)
     
     preview_text.insert(tk.END, format_qty_line("Empty Qty:", empty_qty_str))
@@ -298,11 +298,14 @@ def update_preview():
     preview_text.insert(tk.END, f"\n")
     
     # Payment mode value is also right-aligned in the preview
-    # Use MAX_TEXT_WIDTH plus KG suffix length (3 chars for " KG" used in format_qty_line) for alignment consistency
+    # MAX_TEXT_WIDTH + 3 (for " KG") = 21 chars
     padded_payment = f"{payment: >{MAX_TEXT_WIDTH + 3}}"
     
     preview_text.insert(tk.END, format_preview_line("Payment Mode:", padded_payment))
     preview_text.insert(tk.END, f"\nThank you for your business!")
+
+    # Dotted Outer Border (Simulated for bottom)
+    preview_text.insert(tk.END, f". . . . . . . . . . . . . . . . . . .\n")
     
 
 def generate_bill():
