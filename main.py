@@ -41,8 +41,8 @@ def generate_pdf(bill_id, data):
     # Define constants
     outer_margin = 0.2 * inch # Margin from edge of the A6 page
     
-    # NEW: Further reduced horizontal padding for content alignment (was 0.20 inch, now 0.15 inch)
-    INNER_PADDING = 0.15 * inch
+    # Horizontal padding for content alignment
+    INNER_PADDING = 0.10 * inch
     
     # Left Content Anchor: Used for all labels (Party:, Empty Qty:)
     x_left_content = outer_margin + INNER_PADDING
@@ -58,7 +58,7 @@ def generate_pdf(bill_id, data):
         c.setLineWidth(0.5) # Thin line
         c.setDash(3, 3)     # Set to dotted line: 3 points on, 3 points off
         c.line(outer_margin, y, A6[0] - outer_margin, y)
-        c.setDash([])       # FIX: Reset to solid line by passing an empty list
+        c.setDash([])       # Reset to solid line by passing an empty list
         
     # --- Outer Border (Dotted) ---
     c.setLineWidth(0.5) 
@@ -69,19 +69,19 @@ def generate_pdf(bill_id, data):
 
     # --- Header ---
     y = y_start_content
-    c.setFont("Courier", 12) 
+    c.setFont("Courier-Bold", 12) # MADE BOLD: SEBM
     c.drawCentredString(A6[0] / 2, y, "SEBM")
     y -= line_spacing * 1.5
-    c.setFont("Courier", 14)
+    c.setFont("Courier-Bold", 14)
     c.drawCentredString(A6[0] / 2, y, "Sri Elumalaiyan Blue Metals")
     y -= line_spacing * 1.2
-    c.setFont("Courier", 9)
+    c.setFont("Courier-Bold", 9) # MADE BOLD: GSTIN/UIN #:
     c.drawCentredString(A6[0] / 2, y, "GSTIN/UIN #:")
     y -= line_spacing * 0.8
     
-    # --- Date and Time (Centered) ---
+    # --- Date and Time (Centered & BOLD) ---
     y -= line_spacing * 1.0 
-    c.setFont("Courier", 9)
+    c.setFont("Courier-Bold", 9) 
     
     # Prepare the date/time string for centering
     date_part_split = date_time_str.split(" TIME: ")
@@ -92,9 +92,9 @@ def generate_pdf(bill_id, data):
     date_time_centered_str = f"Date: {date_part} Time: {time_part}"
     c.drawCentredString(A6[0] / 2, y, date_time_centered_str) 
     
-    # --- DC/Ref # (Centered) ---
+    # --- DC/Ref # (Centered & BOLD) ---
     y -= line_spacing * 1.5
-    c.setFont("Courier", 10)
+    c.setFont("Courier-Bold", 10) 
     
     # Centered DC/Ref # string
     dc_ref_centered_str = f"DC/Ref #: {ref_no}"
@@ -103,10 +103,9 @@ def generate_pdf(bill_id, data):
     y -= line_spacing * 0.5 
     
     # --- Line 2 (Below DC/Ref #) ---
-    # KEEP: Separator below DC/Ref #, now DOTTED
     draw_separator(y) 
     
-    # --- Trip Details Header ---
+    # --- Trip Details Header (Already BOLD) ---
     y -= line_spacing * 1.0
     c.setFont("Courier-Bold", 10) 
     c.drawCentredString(A6[0] / 2, y, "OUTGOING TRIP")
@@ -123,8 +122,8 @@ def generate_pdf(bill_id, data):
         ("HSN/SAC:", hsn),
     ]
     
-    # Draw field list (Labels left-aligned, Values RIGHT-ALIGNED at X_RIGHT_CONTENT_ANCHOR)
-    c.setFont("Courier", 10)
+    # Draw field list (Labels left-aligned, Values RIGHT-ALIGNED)
+    c.setFont("Courier-Bold", 10) # Body content is BOLD
     
     for label, value in fields:
         y -= line_spacing * 1.2
@@ -157,10 +156,8 @@ def generate_pdf(bill_id, data):
     # --- Footer (Thanking Part) ---
     y -= line_spacing * 1.5 
     
-    # Horizontal line just above the Thank You message
-    
     y -= line_spacing * 1.0
-    c.setFont("Courier", 8)
+    c.setFont("Courier-Bold", 8) # MADE BOLD: Thank you message
     c.drawCentredString(A6[0] / 2, y, "Thank you for your business.")
     y -= line_spacing * 1.0
     c.drawCentredString(A6[0] / 2, y, "Please visit Sri Elumalaiyan Blue Metals.")
@@ -191,8 +188,8 @@ def insert_bill(**data):
 # --- 3. MAIN APPLICATION LOGIC ---
 
 # Function to format lines for the fixed-width preview
-# REDUCED label_width from 10 to 9 to reduce gap
-def format_preview_line(label, value, label_width=9):
+# NEW: Reduced label_width from 9 to 7 to reduce gap
+def format_preview_line(label, value, label_width=7):
     """Pads the label to a fixed width for clean column alignment in the preview."""
     padded_label = f"{label: <{label_width}}"
     return f"{padded_label}{value}\n"
@@ -266,8 +263,8 @@ def update_preview():
     preview_text.insert(tk.END, f"          OUTGOING TRIP\n")
     
     # Use the formatting helper for consistent left-column alignment
-    # Adjusted from 17 to 18 to align cleanly with reduced label width (9)
-    MAX_TEXT_WIDTH = 18 
+    # MAX_TEXT_WIDTH adjusted to work with label_width=7
+    MAX_TEXT_WIDTH = 20 
     
     def format_detail_line(label, value):
         padded_value = f"{value: >{MAX_TEXT_WIDTH}}"
@@ -298,7 +295,7 @@ def update_preview():
     preview_text.insert(tk.END, f"\n")
     
     # Payment mode value is also right-aligned in the preview
-    # MAX_TEXT_WIDTH + 3 (for " KG") = 21 chars
+    # MAX_TEXT_WIDTH + 3 (for " KG") = 23 chars
     padded_payment = f"{payment: >{MAX_TEXT_WIDTH + 3}}"
     
     preview_text.insert(tk.END, format_preview_line("Payment Mode:", padded_payment))
@@ -446,7 +443,8 @@ frame_right.pack(side="right", expand=True, fill="both")
 
 tk.Label(frame_right, text="Live Bill Preview", font=("Courier", 14, "bold"), bg="#f5f5f5").pack()
 # Set width to 40 characters for better fixed-width simulation
-preview_text = tk.Text(frame_right, width=40, height=30, font=("Courier", 10), relief=tk.SUNKEN, borderwidth=3, bg="white")
+# Changed font to bold Courier for the entire text area
+preview_text = tk.Text(frame_right, width=40, height=30, font=("Courier", 10, "bold"), relief=tk.SUNKEN, borderwidth=3, bg="white")
 preview_text.pack(fill="both", expand=True)
 
 # Run initial preview
