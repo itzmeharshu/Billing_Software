@@ -5,21 +5,17 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
 from reportlab.lib.pagesizes import A6
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 import os
 import time
+import re # Import regex for safer file name sanitization
 
-# --- 1. BILL GENERATOR LOGIC (Mimicking bill_generator.py) ---
-
-# Register Courier font for a receipt-like appearance
-try:
-    pdfmetrics.registerFont(TTFont('Mono', 'Courier.ttf'))
-except:
-    # Fallback if Courier.ttf isn't found, ReportLab's built-in fonts will be used
-    pass # Keep it silent to clean up the console output
+# --- 1. BILL GENERATOR LOGIC (PDF Generation) ---
 
 def generate_pdf(bill_id, data):
-    """Generates a PDF bill that mimics the thermal receipt in the image."""
+    """
+    Generates a PDF bill that mimics the thermal receipt in the image.
+    Uses precise positioning and right alignment for numerical values.
+    """
     
     # Extract data with safe access
     ref_no = data.get('ref_no', '')
@@ -33,79 +29,118 @@ def generate_pdf(bill_id, data):
     full_qty = data.get('full_qty', 0.0)
     net_qty = data.get('net_qty', 0.0)
     payment = data.get('payment', '')
-    date_time = data.get('date_time', datetime.now().strftime("%d-%m-%Y Time: %I:%M%p").upper())
+    # date_time_str is pre-formatted as "DD-MM-YYYY Time: HH:MMAM/PM"
+    date_time_str = data.get('date_time', datetime.now().strftime("%d-%m-%Y Time: %I:%M%p").upper())
 
-    # --- FIX 1: Sanitize ref_no for file name safety ---
-    # Replace invalid file system characters with an underscore
-    safe_ref_no = ref_no.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
+    # --- Sanitize ref_no for file name safety ---
+    safe_ref_no = re.sub(r'[\\/:*?"<>|]', '-', ref_no)
     file_name = f"Bill_{bill_id}_{safe_ref_no}.pdf"
     
     c = canvas.Canvas(file_name, pagesize=A6)
     
-    # Define starting coordinates and font size
-    x_margin = 0.5 * inch
-    y_start = A6[1] - 0.5 * inch # Top of the page
-    line_height = 0.25 * inch
-    font_size = 10
+    # Define constants
+    outer_margin = 0.2 * inch # Margin from edge of the A6 page
     
-    # Helper for drawing lines
-    def draw_line(y, thickness=1):
-        c.setLineWidth(thickness)
-        c.line(0.2 * inch, y, A6[0] - 0.2 * inch, y)
+    # Left Content Anchor: Used for all labels (Date:, Party:, Empty Qty:)
+    x_left_content = outer_margin + 0.1 * inch 
+    
+    # Right Content Anchor: Used for right-justifying quantities (KG values) and all detail values (RKS, CRUSHER)
+    X_RIGHT_CONTENT_ANCHOR = A6[0] - outer_margin - 0.1 * inch 
+    
+    y_start_content = A6[1] - outer_margin - 0.2 * inch # Top edge for text content
+    line_spacing = 0.16 * inch # Base vertical spacing for compact look
+    
+    # Helper for drawing the thin separator lines
+    def draw_separator(y):
+        c.setLineWidth(0.5) # Thin line
+        c.line(outer_margin, y, A6[0] - outer_margin, y)
+
+    # --- Outer Border (Retained) ---
+    c.setLineWidth(0.5) 
+    c.rect(outer_margin, outer_margin, A6[0] - 2*outer_margin, A6[1] - 2*outer_margin)
 
     # --- Header ---
-    y = y_start
-    c.setFont("Helvetica-Bold", 12)
+    y = y_start_content
+    c.setFont("Courier", 12) 
     c.drawCentredString(A6[0] / 2, y, "SEBM")
-    y -= line_height
-    c.setFont("Helvetica-Bold", 14)
+    y -= line_spacing * 1.5
+    c.setFont("Courier", 14)
     c.drawCentredString(A6[0] / 2, y, "Sri Elumalaiyan Blue Metals")
-    y -= line_height * 0.8
-    c.setFont("Helvetica", 8)
+    y -= line_spacing * 1.2
+    c.setFont("Courier", 9)
     c.drawCentredString(A6[0] / 2, y, "GSTIN/UIN #:")
-    y -= line_height * 0.8
+    y -= line_spacing * 0.8
     
-    # --- Date and DC/Ref # ---
-    draw_line(y)
-    y -= line_height * 0.8
-    c.setFont("Helvetica", 9)
-    c.drawString(x_margin, y, date_time)
-    
-    y -= line_height * 0.8
-    c.setFont("Helvetica", 10)
-    c.drawString(x_margin, y, f"DC/Ref #: {ref_no}")
-    y -= line_height * 0.8
-    draw_line(y)
-    
-    # --- Trip Details ---
-    y -= line_height * 0.8
-    c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(A6[0] / 2, y, "OUTGOING TRIP")
-    y -= line_height * 0.8
-    draw_line(y)
-    y -= line_height * 0.2 # Small buffer
+    # --- Line 1 (After Header) ---
+    # draw_separator(y) # REMOVED: Separator after GSTIN/UIN #
 
+    # --- Date and Time (Fixed to prevent overlap) ---
+    y -= line_spacing * 1.0 
+    c.setFont("Courier", 9)
+    
+    # Split the date_time_str into date and time parts
+    date_part = ""
+    time_part = ""
+    if " TIME: " in date_time_str:
+        parts = date_time_str.split(" TIME: ")
+        date_part = parts[0]
+        time_part = parts[1] if len(parts) > 1 else ""
+    else:
+        date_part = date_time_str
+
+    # 1. Date (Left aligned)
+    date_label = "Date: "
+    c.drawString(x_left_content, y, date_label + date_part) 
+    
+    # 2. Time (Right aligned)
+    time_label = "Time: "
+    c.drawRightString(X_RIGHT_CONTENT_ANCHOR, y, time_part) # Time value
+    
+    # Calculate where the "Time: " label should start for proper spacing
+    time_label_width = c.stringWidth(time_part, "Courier", 9)
+    x_time_label = X_RIGHT_CONTENT_ANCHOR - time_label_width - c.stringWidth(time_label, "Courier", 9)
+    c.drawString(x_time_label, y, time_label) # Time label
+    
+    # --- DC/Ref # ---
+    y -= line_spacing * 1.5
+    c.setFont("Courier", 10)
+    c.drawString(x_left_content, y, "DC/Ref #: ")
+    c.drawString(x_left_content + c.stringWidth("DC/Ref #: ", "Courier", 10), y, ref_no)
+    
+    y -= line_spacing * 0.5 
+    
+    # --- Line 2 (Before OUTGOING TRIP) ---
+    # KEEP: Separator below DC/Ref #
+    draw_separator(y) 
+    
+    # --- Trip Details Header ---
+    y -= line_spacing * 1.0
+    c.setFont("Courier-Bold", 10) 
+    c.drawCentredString(A6[0] / 2, y, "OUTGOING TRIP")
+    y -= line_spacing * 0.5 
+
+    # Field list
     fields = [
         ("Party :", party),
         ("Loading :", loading),
         ("UnLoading:", unloading),
-        ("Transport:", party), 
+        ("Transport:", party), # Assumes transport is the same as party
         ("Truck #:", truck),
         ("Item :", item),
         ("HSN/SAC:", hsn),
     ]
     
-    # Draw field list
-    c.setFont("Helvetica", 10)
-    SMALL_LINE = line_height * 0.7 # --- FIX 2: Reduced vertical spacing ---
+    # Draw field list (Labels left-aligned, Values RIGHT-ALIGNED at X_RIGHT_CONTENT_ANCHOR)
+    c.setFont("Courier", 10)
     
     for label, value in fields:
-        y -= SMALL_LINE
-        c.drawString(x_margin, y, label)
-        c.drawString(x_margin + 1.2 * inch, y, str(value)) 
+        y -= line_spacing * 1.2
+        c.drawString(x_left_content, y, label) 
+        # Right-aligning all detail values to the common anchor
+        c.drawRightString(X_RIGHT_CONTENT_ANCHOR, y, str(value)) 
 
     # --- Quantity Section ---
-    y -= line_height * 0.5
+    y -= line_spacing * 1.0
     
     qty_fields = [
         ("Empty Qty:", f"{empty_qty:.3f} KG"),
@@ -113,34 +148,31 @@ def generate_pdf(bill_id, data):
         ("Net Qty :", f"{net_qty:.3f} KG"),
     ]
 
+    # Draw quantity list (Labels left-aligned, Values RIGHT-ALIGNED)
     for label, value in qty_fields:
-        y -= SMALL_LINE
-        c.drawString(x_margin, y, label)
-        c.drawString(x_margin + 1.2 * inch, y, value) 
+        y -= line_spacing * 1.2
+        c.drawString(x_left_content, y, label)
+        c.drawRightString(X_RIGHT_CONTENT_ANCHOR, y, value) 
 
     # --- Signature and Payment ---
-    y -= line_height * 0.5
-    
-    # --- FIX 3: Adjusted circle position to clear the Net Qty value ---
-    c.setStrokeColorRGB(0, 0, 0)
-    c.setLineWidth(1)
-    # Draw the circle to the right side, mimicking the stamp location
-    c.circle(A6[0] - 1.2 * inch, y - 0.2 * inch, 0.3 * inch) 
-    
-    y -= line_height * 1.5 # Space for the stamp
+    y -= line_spacing * 2.0 # Space for the physical stamp/signature
 
-    c.drawString(x_margin, y, "Payment Mode:")
-    c.drawString(x_margin + 1.2 * inch, y, payment)
+    c.drawString(x_left_content, y, "Payment Mode:")
+    # Value is RIGHT-ALIGNED to match the alignment of quantities in the image
+    c.drawRightString(X_RIGHT_CONTENT_ANCHOR, y, payment) 
     
     # --- Footer (Thanking Part) ---
-    y -= line_height * 2.5
-    draw_line(y)
-    y -= line_height 
-    c.setFont("Helvetica", 8)
+    y -= line_spacing * 1.5 
+    
+    # Horizontal line just above the Thank You message
+    # draw_separator(y) # REMOVED: Separator before footer
+    
+    y -= line_spacing * 1.0
+    c.setFont("Courier", 8)
     c.drawCentredString(A6[0] / 2, y, "Thank you for your business.")
-    y -= line_height * 0.8
+    y -= line_spacing * 1.0
     c.drawCentredString(A6[0] / 2, y, "Please visit Sri Elumalaiyan Blue Metals.")
-    y -= line_height * 0.8
+    y -= line_spacing * 1.0
     c.drawCentredString(A6[0] / 2, y, "Call to know more.")
     
     # Save the PDF
@@ -166,6 +198,12 @@ def insert_bill(**data):
 
 # --- 3. MAIN APPLICATION LOGIC ---
 
+# Function to format lines for the fixed-width preview
+def format_preview_line(label, value, label_width=12):
+    """Pads the label to a fixed width for clean column alignment in the preview."""
+    padded_label = f"{label: <{label_width}}"
+    return f"{padded_label}{value}\n"
+
 def update_preview():
     # Gather all fields
     ref_no = entry_ref.get()
@@ -178,45 +216,92 @@ def update_preview():
     empty_qty_str = entry_empty_qty.get()
     full_qty_str = entry_full_qty.get()
     payment = entry_payment.get()
-    # Format date and time for display
-    date_time_display = datetime.now().strftime("%d-%m-%Y Time: %I:%M%p").upper().replace("AM", "AM").replace("PM", "PM")
-
+    
+    # Format date and time for PDF (includes " Time: ")
+    date_time_for_pdf = datetime.now().strftime("%d-%m-%Y Time: %I:%M%p").upper().replace("AM", "AM").replace("PM", "PM")
+    
     # Calculate Net Qty
     net_qty_str = "N/A"
+    empty_qty_f = 0.0
+    full_qty_f = 0.0
     try:
-        empty_qty = float(empty_qty_str)
-        full_qty = float(full_qty_str)
-        net_qty = full_qty - empty_qty
+        empty_qty_f = float(empty_qty_str)
+        full_qty_f = float(full_qty_str)
+        net_qty = full_qty_f - empty_qty_f
         net_qty_str = f"{net_qty:.3f}"
-        empty_qty_str = f"{empty_qty:.3f}"
-        full_qty_str = f"{full_qty:.3f}"
+        empty_qty_str = f"{empty_qty_f:.3f}"
+        full_qty_str = f"{full_qty_f:.3f}"
     except ValueError:
         pass
 
+    # Split date and time for cleaner preview formatting
+    date_part = ""
+    time_part = ""
+    if " TIME: " in date_time_for_pdf:
+        parts = date_time_for_pdf.split(" TIME: ")
+        date_part = parts[0]
+        time_part = parts[1] if len(parts) > 1 else ""
+    else:
+        date_part = date_time_for_pdf
+        
     preview_text.delete("1.0", tk.END)
     
-    # Simulate the receipt format
-    preview_text.insert(tk.END, f"            SEBM\n")
-    preview_text.insert(tk.END, f"    Sri Elumalaiyan Blue Metals\n")
-    preview_text.insert(tk.END, f"          GSTIN/UIN #:\n")
-    preview_text.insert(tk.END, f"-----------------------------------\n")
-    preview_text.insert(tk.END, f"{date_time_display}\n")
+    # --- Simulate the receipt format (Fixed-width for alignment) ---
+    preview_text.insert(tk.END, f"            SEBM\n")
+    preview_text.insert(tk.END, f"    Sri Elumalaiyan Blue Metals\n")
+    preview_text.insert(tk.END, f"          GSTIN/UIN #:\n")
+    # preview_text.insert(tk.END, f"-----------------------------------\n") # REMOVED: Separator after GSTIN/UIN #
+    
+    # Fix: Date and Time on one line, separated clearly
+    date_str = f"Date: {date_part}"
+    time_str = f"Time: {time_part}"
+    # Calculate spacing assuming a max line width of 35 chars
+    gap = 35 - len(date_str) - len(time_str)
+    gap_str = " " * max(1, gap)
+    preview_text.insert(tk.END, f"{date_str}{gap_str}{time_str}\n")
+    
     preview_text.insert(tk.END, f"DC/Ref #: {ref_no}\n")
-    preview_text.insert(tk.END, f"-----------------------------------\n")
-    preview_text.insert(tk.END, f"          OUTGOING TRIP\n")
-    preview_text.insert(tk.END, f"-----------------------------------\n")
-    preview_text.insert(tk.END, f"Party : {party}\n")
-    preview_text.insert(tk.END, f"Loading : {loading}\n")
-    preview_text.insert(tk.END, f"UnLoading: {unloading}\n")
-    preview_text.insert(tk.END, f"Transport: {party}\n") 
-    preview_text.insert(tk.END, f"Truck #: {truck}\n")
-    preview_text.insert(tk.END, f"Item : {item}\n")
-    preview_text.insert(tk.END, f"HSN/SAC: {hsn}\n")
-    preview_text.insert(tk.END, f"Empty Qty: {empty_qty_str} KG\n")
-    preview_text.insert(tk.END, f"Full Qty : {full_qty_str} KG\n")
-    preview_text.insert(tk.END, f"Net Qty : {net_qty_str} KG\n")
+    preview_text.insert(tk.END, f"-----------------------------------\n") # KEEP: Separator below DC/Ref #
+    
+    preview_text.insert(tk.END, f"          OUTGOING TRIP\n")
+    preview_text.insert(tk.END, f"-----------------------------------\n") # This was part of the original logic, let's keep it to maintain block structure alignment
+    
+    # Use the formatting helper for consistent left-column alignment
+    # Max width for right-aligned text values to align them properly (matches KG width)
+    MAX_TEXT_WIDTH = 15
+    
+    def format_detail_line(label, value):
+        padded_value = f"{value: >{MAX_TEXT_WIDTH}}"
+        return format_preview_line(label, padded_value)
+        
+    preview_text.insert(tk.END, format_detail_line("Party :", party))
+    preview_text.insert(tk.END, format_detail_line("Loading :", loading))
+    preview_text.insert(tk.END, format_detail_line("UnLoading:", unloading))
+    preview_text.insert(tk.END, format_detail_line("Transport:", party)) 
+    preview_text.insert(tk.END, format_detail_line("Truck #:", truck))
+    preview_text.insert(tk.END, format_detail_line("Item :", item))
+    preview_text.insert(tk.END, format_detail_line("HSN/SAC:", hsn))
+    
+    # Quantity lines - must look right-aligned (using spaces to push the value right)
+    
+    # Max width for KG values to align them properly
+    MAX_KG_WIDTH = 12 
+    
+    # Helper for right-aligning the KG values in the preview
+    def format_qty_line(label, qty_str):
+        padded_qty = f"{qty_str: >{MAX_KG_WIDTH}} KG"
+        return format_preview_line(label, padded_qty)
+    
+    preview_text.insert(tk.END, format_qty_line("Empty Qty:", empty_qty_str))
+    preview_text.insert(tk.END, format_qty_line("Full Qty :", full_qty_str))
+    preview_text.insert(tk.END, format_qty_line("Net Qty :", net_qty_str))
     preview_text.insert(tk.END, f"\n")
-    preview_text.insert(tk.END, f"Payment Mode: {payment}\n")
+    
+    # Payment mode value is also right-aligned in the preview
+    # Use MAX_TEXT_WIDTH plus KG suffix length (3 chars for " KG" used in format_qty_line) for alignment consistency
+    padded_payment = f"{payment: >{MAX_TEXT_WIDTH + 3}}"
+    
+    preview_text.insert(tk.END, format_preview_line("Payment Mode:", padded_payment))
     preview_text.insert(tk.END, f"\nThank you for your business!")
     
 
@@ -287,73 +372,81 @@ frame_left.pack(side="left", fill="y")
 # --- Form Fields ---
 
 # Row 0
-tk.Label(frame_left, text="DC/Ref #").grid(row=0, column=0, sticky="w")
+tk.Label(frame_left, text="DC/Ref #").grid(row=0, column=0, sticky="w", padx=5, pady=5)
 entry_ref = tk.Entry(frame_left)
-entry_ref.grid(row=0, column=1)
+entry_ref.grid(row=0, column=1, padx=5, pady=5)
 
 # Row 1
-tk.Label(frame_left, text="Party Name (Transport)").grid(row=1, column=0, sticky="w")
+tk.Label(frame_left, text="Party Name (Transport)").grid(row=1, column=0, sticky="w", padx=5, pady=5)
 entry_party = tk.Entry(frame_left)
-entry_party.grid(row=1, column=1)
+entry_party.grid(row=1, column=1, padx=5, pady=5)
+entry_party.insert(0, "RKS") # Example data
 
 # Row 2
-tk.Label(frame_left, text="Loading").grid(row=2, column=0, sticky="w")
+tk.Label(frame_left, text="Loading").grid(row=2, column=0, sticky="w", padx=5, pady=5)
 entry_loading = tk.Entry(frame_left)
 entry_loading.insert(0, "CRUSHER") # Pre-fill as per image
-entry_loading.grid(row=2, column=1)
+entry_loading.grid(row=2, column=1, padx=5, pady=5)
 
 # Row 3
-tk.Label(frame_left, text="UnLoading").grid(row=3, column=0, sticky="w")
+tk.Label(frame_left, text="UnLoading").grid(row=3, column=0, sticky="w", padx=5, pady=5)
 entry_unloading = tk.Entry(frame_left)
 entry_unloading.insert(0, "PARTY SITE") # Pre-fill as per image
-entry_unloading.grid(row=3, column=1)
+entry_unloading.grid(row=3, column=1, padx=5, pady=5)
 
 # Row 4
-tk.Label(frame_left, text="Truck No (TN 12...)").grid(row=4, column=0, sticky="w")
+tk.Label(frame_left, text="Truck No (TN 12...)").grid(row=4, column=0, sticky="w", padx=5, pady=5)
 entry_truck = tk.Entry(frame_left)
-entry_truck.grid(row=4, column=1)
+entry_truck.insert(0, "TN 12 AW 4728") # Example data
+entry_truck.grid(row=4, column=1, padx=5, pady=5)
 
 # Row 5
-tk.Label(frame_left, text="Item").grid(row=5, column=0, sticky="w")
+tk.Label(frame_left, text="Item").grid(row=5, column=0, sticky="w", padx=5, pady=5)
 entry_item = tk.Entry(frame_left)
 entry_item.insert(0, "GRAVEL") # Pre-fill as per image
-entry_item.grid(row=5, column=1)
+entry_item.grid(row=5, column=1, padx=5, pady=5)
 
 # Row 6
-tk.Label(frame_left, text="HSN/SAC").grid(row=6, column=0, sticky="w")
+tk.Label(frame_left, text="HSN/SAC").grid(row=6, column=0, sticky="w", padx=5, pady=5)
 entry_hsn = tk.Entry(frame_left)
 entry_hsn.insert(0, "25171010") # Pre-fill as per image
-entry_hsn.grid(row=6, column=1)
+entry_hsn.grid(row=6, column=1, padx=5, pady=5)
 
 # Row 7
-tk.Label(frame_left, text="Empty Qty (KG)").grid(row=7, column=0, sticky="w")
+tk.Label(frame_left, text="Empty Qty (KG)").grid(row=7, column=0, sticky="w", padx=5, pady=5)
 entry_empty_qty = tk.Entry(frame_left)
-entry_empty_qty.grid(row=7, column=1)
+entry_empty_qty.insert(0, "15.560") # Example data
+entry_empty_qty.grid(row=7, column=1, padx=5, pady=5)
 
 # Row 8
-tk.Label(frame_left, text="Full Qty (KG)").grid(row=8, column=0, sticky="w")
+tk.Label(frame_left, text="Full Qty (KG)").grid(row=8, column=0, sticky="w", padx=5, pady=5)
 entry_full_qty = tk.Entry(frame_left)
-entry_full_qty.grid(row=8, column=1)
+entry_full_qty.insert(0, "69.580") # Example data
+entry_full_qty.grid(row=8, column=1, padx=5, pady=5)
 
 # Row 9 (Empty for spacing)
 tk.Label(frame_left, text="").grid(row=9, column=0, sticky="w")
 
 # Row 10
-tk.Label(frame_left, text="Payment Mode").grid(row=10, column=0, sticky="w")
+tk.Label(frame_left, text="Payment Mode").grid(row=10, column=0, sticky="w", padx=5, pady=5)
 entry_payment = tk.Entry(frame_left)
 entry_payment.insert(0, "CASH") # Pre-fill as per image
-entry_payment.grid(row=10, column=1)
+entry_payment.grid(row=10, column=1, padx=5, pady=5)
 
 
-tk.Button(frame_left, text="Preview", command=update_preview).grid(row=11, column=0, pady=10)
-tk.Button(frame_left, text="Generate Bill", command=generate_bill).grid(row=11, column=1, pady=10)
+tk.Button(frame_left, text="Preview", command=update_preview, bg="#E6F0FF", fg="#0056D6").grid(row=11, column=0, pady=10, sticky="ew", padx=5)
+tk.Button(frame_left, text="Generate Bill", command=generate_bill, bg="#0056D6", fg="white").grid(row=11, column=1, pady=10, sticky="ew", padx=5)
 
 # Right Frame (Preview)
-frame_right = tk.Frame(root, padx=20, pady=20)
+frame_right = tk.Frame(root, padx=20, pady=20, bg="#f5f5f5")
 frame_right.pack(side="right", expand=True, fill="both")
 
-tk.Label(frame_right, text="Live Bill Preview", font=("Arial", 14, "bold")).pack()
-preview_text = tk.Text(frame_right, width=50, height=30, font=("Courier", 10))
-preview_text.pack()
+tk.Label(frame_right, text="Live Bill Preview", font=("Courier", 14, "bold"), bg="#f5f5f5").pack()
+# Set width to 40 characters for better fixed-width simulation
+preview_text = tk.Text(frame_right, width=40, height=30, font=("Courier", 10), relief=tk.SUNKEN, borderwidth=3, bg="white")
+preview_text.pack(fill="both", expand=True)
+
+# Run initial preview
+update_preview()
 
 root.mainloop()
